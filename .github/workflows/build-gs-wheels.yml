@@ -69,8 +69,8 @@ jobs:
           set -eux
 
           export PATH=/opt/conda/bin:/usr/local/cuda-12.1/bin:$PATH
-          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH
-
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:${LD_LIBRARY_PATH:-}
+              
           mkdir -p wheels
 
           echo "=== GLIBC ==="
