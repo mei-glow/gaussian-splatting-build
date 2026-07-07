@@ -53,25 +53,48 @@ jobs:
           print("torch:", torch.__version__)
           print("torch cuda:", torch.version.cuda)
           print("cuda available:", torch.cuda.is_available())
+          print("torch file:", torch.__file__)
           PY
 
-      - name: Build wheels
+      - name: Build wheels with setup.py
         env:
           CUDA_HOME: /usr/local/cuda
           CUDA_PATH: /usr/local/cuda
           TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9"
           FORCE_CUDA: "1"
         run: |
+          set -eux
           mkdir -p wheels
 
+          echo "=== nvcc ==="
+          which nvcc
+          nvcc --version
+
+          echo "=== torch check ==="
+          python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("torch file:", torch.__file__)
+          PY
+
           echo "=== Build simple-knn ==="
-          pip wheel ./submodules/simple-knn -w wheels --no-deps --no-build-isolation -v
+          cd submodules/simple-knn
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          cd ../..
 
           echo "=== Build diff-gaussian-rasterization ==="
-          pip wheel ./submodules/diff-gaussian-rasterization -w wheels --no-deps --no-build-isolation -v
+          cd submodules/diff-gaussian-rasterization
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          cd ../..
 
           echo "=== Build fused-ssim ==="
-          pip wheel ./submodules/fused-ssim -w wheels --no-deps --no-build-isolation -v
+          cd submodules/fused-ssim
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          cd ../..
 
           echo "=== Built wheels ==="
           ls -lh wheels
