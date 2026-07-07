@@ -65,13 +65,13 @@ jobs:
           mkdir -p wheels
 
           echo "=== Build simple-knn ==="
-          pip wheel ./submodules/simple-knn -w wheels --no-deps -v
+          pip wheel ./submodules/simple-knn -w wheels --no-deps --no-build-isolation -v
 
           echo "=== Build diff-gaussian-rasterization ==="
-          pip wheel ./submodules/diff-gaussian-rasterization -w wheels --no-deps -v
+          pip wheel ./submodules/diff-gaussian-rasterization -w wheels --no-deps --no-build-isolation -v
 
           echo "=== Build fused-ssim ==="
-          pip wheel ./submodules/fused-ssim -w wheels --no-deps -v
+          pip wheel ./submodules/fused-ssim -w wheels --no-deps --no-build-isolation -v
 
           echo "=== Built wheels ==="
           ls -lh wheels
