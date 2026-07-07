@@ -6,67 +6,78 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    container: ubuntu:20.04
 
     steps:
+      - name: Install base tools in Ubuntu 20.04 container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y \
+            software-properties-common \
+            ca-certificates \
+            curl \
+            wget \
+            git \
+            gnupg \
+            build-essential \
+            ninja-build
+
+      - name: Install Python 3.11 in Ubuntu 20.04 container
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          add-apt-repository ppa:deadsnakes/ppa -y
+          apt-get update
+          apt-get install -y python3.11 python3.11-dev python3.11-venv
+          python3.11 --version
+
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Show files
+      - name: Install CUDA 12.1 in Ubuntu 20.04 container
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          pwd
-          ls -la
-          echo "=== submodules ==="
-          ls -la submodules || true
-          echo "=== simple-knn ==="
-          ls -la submodules/simple-knn || true
-          echo "=== diff-gaussian-rasterization ==="
-          ls -la submodules/diff-gaussian-rasterization || true
-          echo "=== fused-ssim ==="
-          ls -la submodules/fused-ssim || true
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+          dpkg -i cuda-keyring_1.1-1_all.deb
+          apt-get update
+          apt-get install -y cuda-nvcc-12-1 cuda-cudart-dev-12-1 cuda-command-line-tools-12-1 cuda-compiler-12-1
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install CUDA 12.1 toolkit
-        uses: Jimver/cuda-toolkit@v0.2.21
-        with:
-          cuda: "12.1.0"
-
-      - name: Check CUDA
+      - name: Create Python venv and install build deps
         run: |
-          echo "CUDA_HOME=$CUDA_HOME"
-          echo "CUDA_PATH=$CUDA_PATH"
-          which nvcc
-          nvcc --version
-
-      - name: Install Python build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install setuptools wheel ninja packaging
+          python3.11 -m venv /tmp/venv
+          . /tmp/venv/bin/activate
+          python -m pip install --upgrade pip setuptools wheel
+          pip install "numpy<2" ninja packaging
           pip install torch==2.2.2+cu121 torchvision==0.17.2+cu121 --index-url https://download.pytorch.org/whl/cu121
           python - <<'PY'
           import torch
           print("torch:", torch.__version__)
           print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
           print("torch file:", torch.__file__)
           PY
 
       - name: Build wheels with setup.py
         env:
-          CUDA_HOME: /usr/local/cuda
-          CUDA_PATH: /usr/local/cuda
+          CUDA_HOME: /usr/local/cuda-12.1
+          CUDA_PATH: /usr/local/cuda-12.1
           TORCH_CUDA_ARCH_LIST: "7.0;7.5;8.0;8.6;8.9"
           FORCE_CUDA: "1"
         run: |
           set -eux
+          . /tmp/venv/bin/activate
           mkdir -p wheels
 
+          echo "=== GLIBC ==="
+          ldd --version
+
           echo "=== nvcc ==="
+          export PATH=/usr/local/cuda-12.1/bin:$PATH
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH
           which nvcc
           nvcc --version
 
@@ -102,5 +113,5 @@ jobs:
       - name: Upload wheels artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gs-wheels-py311-torch222-cu121
+          name: gs-wheels-py311-torch222-cu121-glibc231
           path: wheels/*.whl
