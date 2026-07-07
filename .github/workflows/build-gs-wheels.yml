@@ -15,28 +15,26 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
-            software-properties-common \
             ca-certificates \
             curl \
             wget \
             git \
             gnupg \
             build-essential \
-            ninja-build
-
-      - name: Install Python 3.11 in Ubuntu 20.04 container
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          add-apt-repository ppa:deadsnakes/ppa -y
-          apt-get update
-          apt-get install -y python3.11 python3.11-dev python3.11-venv
-          python3.11 --version
+            ninja-build \
+            bzip2
 
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Install Miniconda with Python 3.11
+        run: |
+          wget https://repo.anaconda.com/miniconda/Miniconda3-py311_24.5.0-0-Linux-x86_64.sh -O /tmp/miniconda.sh
+          bash /tmp/miniconda.sh -b -p /opt/conda
+          /opt/conda/bin/conda --version
+          /opt/conda/bin/python --version
 
       - name: Install CUDA 12.1 in Ubuntu 20.04 container
         env:
@@ -47,10 +45,10 @@ jobs:
           apt-get update
           apt-get install -y cuda-nvcc-12-1 cuda-cudart-dev-12-1 cuda-command-line-tools-12-1 cuda-compiler-12-1
 
-      - name: Create Python venv and install build deps
+      - name: Install Python build deps
         run: |
-          python3.11 -m venv /tmp/venv
-          . /tmp/venv/bin/activate
+          export PATH=/opt/conda/bin:$PATH
+          python --version
           python -m pip install --upgrade pip setuptools wheel
           pip install "numpy<2" ninja packaging
           pip install torch==2.2.2+cu121 torchvision==0.17.2+cu121 --index-url https://download.pytorch.org/whl/cu121
@@ -69,15 +67,20 @@ jobs:
           FORCE_CUDA: "1"
         run: |
           set -eux
-          . /tmp/venv/bin/activate
+
+          export PATH=/opt/conda/bin:/usr/local/cuda-12.1/bin:$PATH
+          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH
+
           mkdir -p wheels
 
           echo "=== GLIBC ==="
           ldd --version
 
+          echo "=== Python ==="
+          which python
+          python --version
+
           echo "=== nvcc ==="
-          export PATH=/usr/local/cuda-12.1/bin:$PATH
-          export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH
           which nvcc
           nvcc --version
 
