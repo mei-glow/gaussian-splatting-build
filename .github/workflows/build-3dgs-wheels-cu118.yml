@@ -44,7 +44,14 @@ jobs:
 
       - name: Verify submodule sources
         run: |
-          set -eux
+          set -euxo pipefail
+
+          # GitHub workspace is mounted into the job container and may
+          # have a different owner from the container user.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          # Trust nested repositories such as Git submodules.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
 
           test -f submodules/simple-knn/setup.py
           test -f submodules/diff-gaussian-rasterization/setup.py
