@@ -1,0 +1,232 @@
+name: Build 3DGS Wheels - Py311 Torch 2.0.1 CUDA 11.8
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    # Match the target server's glibc 2.31.
+    container:
+      image: ubuntu:20.04
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install base build tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -eux
+
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            wget \
+            git \
+            gnupg \
+            build-essential \
+            ninja-build \
+            bzip2 \
+            patchelf
+
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Verify submodule sources
+        run: |
+          set -eux
+
+          test -f submodules/simple-knn/setup.py
+          test -f submodules/diff-gaussian-rasterization/setup.py
+          test -f submodules/fused-ssim/setup.py
+
+          git submodule status --recursive
+
+      - name: Install Miniconda with Python 3.11
+        run: |
+          set -eux
+
+          wget -q \
+            https://repo.anaconda.com/miniconda/Miniconda3-py311_24.5.0-0-Linux-x86_64.sh \
+            -O /tmp/miniconda.sh
+
+          bash /tmp/miniconda.sh -b -p /opt/conda
+          rm -f /tmp/miniconda.sh
+
+          /opt/conda/bin/conda --version
+          /opt/conda/bin/python --version
+
+      - name: Install CUDA Toolkit 11.8
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -eux
+
+          wget -q \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb \
+            -O /tmp/cuda-keyring.deb
+
+          dpkg -i /tmp/cuda-keyring.deb
+          rm -f /tmp/cuda-keyring.deb
+
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cuda-nvcc-11-8 \
+            cuda-cudart-dev-11-8 \
+            cuda-command-line-tools-11-8 \
+            cuda-compiler-11-8
+
+          rm -rf /var/lib/apt/lists/*
+
+          /usr/local/cuda-11.8/bin/nvcc --version
+
+      - name: Install matching PyTorch and build dependencies
+        env:
+          PATH: /opt/conda/bin:/usr/local/cuda-11.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          CUDA_HOME: /usr/local/cuda-11.8
+          CUDA_PATH: /usr/local/cuda-11.8
+        run: |
+          set -eux
+
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            wheel
+
+          python -m pip install \
+            "numpy==1.26.4" \
+            ninja \
+            packaging
+
+          python -m pip install \
+            "torch==2.0.1+cu118" \
+            --index-url https://download.pytorch.org/whl/cu118
+
+          python - <<'PY'
+          import platform
+          import sys
+          import torch
+
+          print("Python:", sys.version)
+          print("Platform:", platform.platform())
+          print("glibc:", platform.libc_ver())
+          print("Torch:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          print("CXX11 ABI:", torch._C._GLIBCXX_USE_CXX11_ABI)
+
+          assert sys.version_info[:2] == (3, 11)
+          assert torch.__version__ == "2.0.1+cu118"
+          assert torch.version.cuda == "11.8"
+          assert torch._C._GLIBCXX_USE_CXX11_ABI is False
+          PY
+
+      - name: Build CUDA extension wheels
+        env:
+          PATH: /opt/conda/bin:/usr/local/cuda-11.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          CUDA_HOME: /usr/local/cuda-11.8
+          CUDA_PATH: /usr/local/cuda-11.8
+
+          # RTX 4090 = Ada, compute capability 8.9.
+          TORCH_CUDA_ARCH_LIST: "8.9"
+
+          # GitHub's builder does not have a physical GPU.
+          FORCE_CUDA: "1"
+
+          # Avoid excessive parallel compiler memory usage.
+          MAX_JOBS: "2"
+
+        run: |
+          set -euxo pipefail
+
+          export LD_LIBRARY_PATH="/usr/local/cuda-11.8/lib64:${LD_LIBRARY_PATH:-}"
+
+          rm -rf wheels
+          mkdir -p wheels
+
+          echo "=== Environment ==="
+          ldd --version | head -n 1
+          python --version
+          gcc --version | head -n 1
+          g++ --version | head -n 1
+          nvcc --version
+
+          python - <<'PY'
+          import torch
+
+          print("Torch:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          print("CUDA available on CI:", torch.cuda.is_available())
+          print("CXX11 ABI:", torch._C._GLIBCXX_USE_CXX11_ABI)
+          PY
+
+          echo "=== Build simple-knn ==="
+          pushd submodules/simple-knn
+          rm -rf build dist *.egg-info
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          popd
+
+          echo "=== Build diff-gaussian-rasterization ==="
+          pushd submodules/diff-gaussian-rasterization
+          rm -rf build dist *.egg-info
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          popd
+
+          echo "=== Build fused-ssim ==="
+          pushd submodules/fused-ssim
+          rm -rf build dist *.egg-info
+          python setup.py bdist_wheel
+          cp dist/*.whl ../../wheels/
+          popd
+
+          echo "=== Wheel results ==="
+          ls -lh wheels
+          python -m pip debug --verbose | sed -n '/Compatible tags/,+10p'
+
+      - name: Install wheels for import validation
+        env:
+          PATH: /opt/conda/bin:/usr/local/cuda-11.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          CUDA_HOME: /usr/local/cuda-11.8
+          CUDA_PATH: /usr/local/cuda-11.8
+        run: |
+          set -eux
+
+          python -m pip install --no-deps wheels/*.whl
+
+          python - <<'PY'
+          import torch
+          import diff_gaussian_rasterization
+          import simple_knn
+
+          # fused-ssim can expose either a top-level module or its CUDA
+          # functions through the rasterizer, depending on repository version.
+          try:
+              import fused_ssim
+              print("fused_ssim top-level import: OK")
+          except ImportError as exc:
+              print("fused_ssim top-level module not exposed:", exc)
+
+          print("Torch:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          print("diff_gaussian_rasterization: OK")
+          print("simple_knn: OK")
+          PY
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3dgs-wheels-linux-py311-torch201-cu118-sm89-glibc231
+          path: wheels/*.whl
+          if-no-files-found: error
+          retention-days: 30
